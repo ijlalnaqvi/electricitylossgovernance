@@ -1,0 +1,705 @@
+---
+title: "07-Supplementary-Analysis"
+date: '(`r format(Sys.Date(), "%d %B, %Y")`)'
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(broom)
+library(flextable)
+library(rgdal)
+library(sf)
+library(sp)
+library(spatialreg)
+library(spdep)
+library(tidyverse)
+library(tmap)
+```
+
+## Load Data
+
+```{r}
+# Read in feeder data
+
+feeders_year <- read.csv(here::here("analysis/data/raw_data/feeders_year.csv")) %>% 
+  select(-X)
+
+feeders_year$GRIDID <- as.integer(feeders_year$GRIDID)
+```
+
+## Wrangling for models
+
+```{r}
+sf_feeders_info <- readRDS(here::here("analysis/data/raw_data/sf_feeders_info.rds"))
+
+sf_feeders_info$GRIDID <- as.integer(sf_feeders_info$GRIDID)
+```
+
+```{r}
+sf_feeder_area_elec <- readRDS(here::here("analysis/data/derived_data/sf_feeder_area_elec.rds"))
+```
+
+```{r}
+feeder_area_elec <- sf_feeder_area_elec %>% 
+  st_set_geometry(NULL)
+```
+
+```{r}
+feeder_area_elec <- as.data.frame(feeder_area_elec)
+```
+
+```{r}
+feeder_area_elec <- feeder_area_elec %>% 
+  select(GRIDID, FEEDER_NAM, KE_IBC, KE_REGION, elec_norm_area)
+```
+
+```{r}
+sf_feeder_population <- readRDS(here::here("analysis/data/derived_data/sf_feeder_population.rds"))
+
+sf_feeder_population$GRIDID <- as.integer(sf_feeder_population$GRIDID)
+```
+
+```{r}
+feeder_population <- sf_feeder_population %>% 
+  st_set_geometry(NULL)
+```
+
+### Join Data
+
+```{r}
+sf_feeders <- left_join(sf_feeders_info, 
+                            feeders_year, 
+                            by = c("GRIDID" = "GRIDID",
+                                   "FEEDER_NAM" = "FEEDER_NAM",
+                                   "KE_IBC" = "KE_IBC",
+                                   "KE_REGION" = "KE_REGION"))
+```
+
+`geometry` is added to `feeders_year` and then saved as `sf_feeders`.
+
+```{r}
+sf_feeders <- left_join(sf_feeders, 
+                        feeder_area_elec,
+                        by = c("GRIDID" = "GRIDID",
+                                   "FEEDER_NAM" = "FEEDER_NAM",
+                                   "KE_IBC" = "KE_IBC",
+                                   "KE_REGION" = "KE_REGION"))
+```
+
+`elec_norm_area` or the electricity density is added to `sf_feeders`.
+
+```{r}
+sf_feeders <- left_join(sf_feeders, 
+                        feeder_population,
+                        by = c("GRIDID" = "GRIDID",
+                                   "FEEDER_NAM" = "FEEDER_NAM",
+                                   "KE_IBC" = "KE_IBC",
+                                   "KE_REGION" = "KE_REGION"))
+```
+
+`populationsum` is added to `sf_feeders`.
+
+### Filter Data
+
+Filter criteria = losses > 0. Filters of electricity density are not used here.
+
+```{r}
+sf_feeders_filtered <- sf_feeders %>% 
+  filter(losses > 0)
+```
+
+The filter of `losses > 0` brings it to 1187 feeders from 1258.
+
+### Moran's I for Losses
+
+```{r}
+
+losses_sp <- as(sf_feeders_filtered, 'Spatial')
+losses_neighbours <- poly2nb(losses_sp)
+losses_weights <- nb2listw(losses_neighbours, 
+                           style = "W",
+                           zero.policy = T)
+losses_lag <- lag.listw(losses_weights, losses_sp$losses)
+
+losses_lag_df <- sf_feeders_filtered %>% 
+  add_column(losses_lag = losses_lag)
+
+losses_moran <- moran.test(losses_lag_df$losses, losses_weights, 
+                           zero.policy = T)
+
+losses_moran$p.value
+```
+
+### OLS Model
+
+```{r}
+
+ols_losses <- lm(losses ~ tot + comRel + resRel + indRel + populationsum + factor(KE_IBC), data = sf_feeders_filtered)
+
+OLS_table <- tidy(ols_losses)
+
+summary(ols_losses)
+
+# Calculate confidence intervals
+
+ciOLS <- as.data.frame(tidy(ols_losses, conf.int = TRUE))
+
+```
+
+```{r}
+# Augment model
+
+sf_feeders_filtered <- augment(ols_losses, 
+                          data = sf_feeders_filtered) %>% 
+  st_as_sf()
+
+```
+
+```{r}
+ols_coefficients <- data.frame(coefficients(ols_losses))
+
+# Coeff cleanup
+ols_coefficients <- cbind(Names = rownames(ols_coefficients), ols_coefficients)
+
+# Number rows
+rownames(ols_coefficients) <- 1:nrow(ols_coefficients)
+
+```
+
+#### Set Weights
+
+```{r}
+sf_feeders_filtered_sp <- as(sf_feeders_filtered, 'Spatial')
+sf_feeders_filtered_neighbours <- poly2nb(sf_feeders_filtered_sp)
+sf_feeders_filtered_weights <- nb2listw(sf_feeders_filtered_neighbours, 
+                                        style = "W", 
+                                        zero.policy = TRUE)
+sf_feeders_filtered$.resid_lag <- lag.listw(sf_feeders_filtered_weights, 
+                                            sf_feeders_filtered$.resid)
+
+```
+
+Weights are set on the basis of neighbours. This means that adjacent feeders influence each other. 
+
+```{r}
+OLS_moran <- moran.test(sf_feeders_filtered$.resid, 
+           sf_feeders_filtered_weights, 
+           adjust.n = TRUE, 
+           zero.policy = TRUE)
+
+```
+
+### Spatial Lag Model
+
+```{r}
+# Rescale variables
+
+rescale_tot <- (scale(as.numeric(sf_feeders_filtered$tot)))
+rescale_tot <- as.data.frame(rescale_tot)
+
+# Join rescaled variables
+
+sf_feeders_filtered <- bind_cols(sf_feeders_filtered, rescale_tot)
+
+sf_feeders_filtered <- sf_feeders_filtered %>% 
+  rename(rescale_tot = `V1`)
+```
+
+```{r}
+lag_losses <- lagsarlm(losses ~ rescale_tot + comRel + resRel + indRel + populationsum + factor(KE_IBC),
+                 data = sf_feeders_filtered,
+                 listw = sf_feeders_filtered_weights,
+                 na.action(sf_feeders_filtered_weights),
+                 zero.policy = T)
+
+summary(lag_losses, Nagelkerke = T)
+
+# Calculate confidence intervals
+
+ciLag <- as.data.frame(tidy(lag_losses, conf.int = TRUE))
+
+impacts(lag_losses, listw = sf_feeders_filtered_weights)
+
+sf_feeders_filtered$resid_lagsarlm <- residuals(lag_losses)
+
+lag_moran <- moran.test(sf_feeders_filtered$resid_lagsarlm, 
+           sf_feeders_filtered_weights, 
+           adjust.n = TRUE, 
+           zero.policy = TRUE)
+
+lag_moran$p.value
+```
+
+```{r}
+lag_coefficients <- data.frame(coefficients(lag_losses))
+
+# Coeff cleanup
+lag_coefficients <- cbind(Names = rownames(lag_coefficients), lag_coefficients)
+
+# Number rows
+rownames(lag_coefficients) <- 1:nrow(lag_coefficients)
+
+```
+
+```{r}
+lag_estimates <- summary(lag_losses)$Coef[,1]
+lag_estimates <- as.data.frame(lag_estimates)
+lag_estimates <- cbind(Names = rownames(lag_estimates), lag_estimates)
+rownames(lag_estimates) <- 1:nrow(lag_estimates)
+
+
+lag_stderror <- summary(lag_losses)$Coef[,2]
+lag_stderror <- as.data.frame(lag_stderror)
+lag_stderror <- cbind(Names = rownames(lag_stderror), lag_stderror)
+rownames(lag_stderror) <- 1:nrow(lag_stderror)
+
+
+lag_prz <- summary(lag_losses)$Coef[,4]
+lag_prz <- as.data.frame(lag_prz)
+lag_prz <- cbind(Names = rownames(lag_prz), lag_prz)
+rownames(lag_prz) <- 1:nrow(lag_prz)
+
+lag_table <- left_join(lag_estimates, lag_stderror)
+lag_table <- left_join(lag_table, lag_prz)
+
+```
+
+### Spatial Error Model
+
+```{r}
+error_losses <- errorsarlm(losses ~ rescale_tot + comRel + resRel + indRel + populationsum + factor(KE_IBC),  data = sf_feeders_filtered,
+                 listw = sf_feeders_filtered_weights,
+                 na.action(sf_feeders_filtered_weights),
+                 zero.policy = T)
+```
+
+```{r}
+summary(error_losses, Nagelkerke = T)
+```
+
+```{r}
+# Calculate confidence intervals
+
+ciError <- as.data.frame(tidy(error_losses, conf.int = TRUE))
+
+```
+
+```{r}
+sf_feeders_filtered$resid_error <- residuals(error_losses)
+
+error_moran <- moran.test(sf_feeders_filtered$resid_error, 
+           sf_feeders_filtered_weights, 
+           adjust.n = TRUE, 
+           zero.policy = TRUE)
+
+error_moran$p.value
+
+error_coefficients <- data.frame(coefficients(error_losses))
+
+# Coeff cleanup
+error_coefficients <- cbind(Names = rownames(error_coefficients), error_coefficients)
+
+# Number rows
+rownames(error_coefficients) <- 1:nrow(error_coefficients)
+
+```
+
+```{r}
+error_estimates <- summary(error_losses)$Coef[,1]
+error_estimates <- as.data.frame(error_estimates)
+error_estimates <- cbind(Names = rownames(error_estimates), error_estimates)
+rownames(error_estimates) <- 1:nrow(error_estimates)
+
+
+error_stderror <- summary(error_losses)$Coef[,2]
+error_stderror <- as.data.frame(error_stderror)
+error_stderror <- cbind(Names = rownames(error_stderror), error_stderror)
+rownames(error_stderror) <- 1:nrow(error_stderror)
+
+error_prz <- summary(error_losses)$Coef[,4]
+error_prz <- as.data.frame(error_prz)
+error_prz <- cbind(Names = rownames(error_prz), error_prz)
+rownames(error_prz) <- 1:nrow(error_prz)
+
+error_table <- left_join(error_estimates, error_stderror)
+error_table <- left_join(error_table, error_prz)
+
+```
+
+## Table of Results
+
+This file contains tables of results obtained from the spatial models.
+
+```{r}
+options(digits = 10)
+```
+
+```{r}
+NL_OLS_table <- OLS_table
+```
+
+```{r}
+# Recode rows
+
+NL_OLS_table <- NL_OLS_table %>% 
+  mutate(term = recode(term, 
+                        `(Intercept)` = "Intercept",
+                        tot = "Total",
+                        comRel = "Commercial %",
+                        resRel = "Residential %",
+                        indRel = "Industrial %",
+                        populationsum = "Population", 
+                         `factor(KE_IBC)Baldia` = "Baldia",
+                         `factor(KE_IBC)Bin Qasim` = "Bin Qasim",
+                         `factor(KE_IBC)Clifton` = "Clifton",
+                         `factor(KE_IBC)Defence` = "Defence",
+                         `factor(KE_IBC)F.B Area` = "F.B Area",
+                         `factor(KE_IBC)Gadap` = "Gadap",
+                         `factor(KE_IBC)Garden` = "Garden",
+                         `factor(KE_IBC)Gulshan-e-Iqbal` = "Gulshan-e-Iqbal",
+                         `factor(KE_IBC)Johar-I` = "Johar-I",
+                         `factor(KE_IBC)Johar-II` = "Johar-II",
+                         `factor(KE_IBC)Johar II` = "Johar II",
+                         `factor(KE_IBC)KIMZ` = "KIMZ",
+                         `factor(KE_IBC)Korangi` = "Korangi",
+                         `factor(KE_IBC)Landhi` = "Landhi",
+                         `factor(KE_IBC)Liaquatabad` = "Liaquatabad",
+                         `factor(KE_IBC)Lyari-I` = "Lyari-I",
+                         `factor(KE_IBC)Lyari-II` = "Lyari-II",
+                         `factor(KE_IBC)Malir` = "Malir",
+                         `factor(KE_IBC)Nazimabad` = "Nazimabad",
+                         `factor(KE_IBC)North Karachi` = "North Karachi",
+                         `factor(KE_IBC)North Nazimabad` = "North Nazimabad",
+                         `factor(KE_IBC)Orangi-I` = "Orangi-I",
+                         `factor(KE_IBC)Orangi-II` = "Orangi-II",
+                         `factor(KE_IBC)Saddar` = "Saddar",
+                         `factor(KE_IBC)Shah Faisal` = "Shah Faisal",
+                         `factor(KE_IBC)SITE` = "SITE",
+                         `factor(KE_IBC)Surjani` = "Surjani",
+                         `factor(KE_IBC)Tipu Sultan` = "Tipu Sultan",
+                         `factor(KE_IBC)Uthal` = "Uthal"
+                         ))
+
+```
+
+```{r}
+# round values
+
+NL_OLS_table <- NL_OLS_table %>% 
+  mutate(estimate = round(estimate, 5)) %>% 
+  mutate(pvalue = round(p.value, 5))
+
+NL_OLS_table <- NL_OLS_table %>% 
+  select(term, estimate, pvalue)
+
+NL_OLS_table <- NL_OLS_table %>% 
+  rename(Names = term,
+         OLSestimates = estimate,
+         OLSpvalue = pvalue)
+
+```
+
+```{r}
+# Recode rows
+
+ciOLS <- ciOLS %>% 
+  mutate(term = recode(term, 
+                        `(Intercept)` = "Intercept",
+                        tot = "Total",
+                        comRel = "Commercial %",
+                        resRel = "Residential %",
+                        indRel = "Industrial %",
+                        populationsum = "Population", 
+                         `factor(KE_IBC)Baldia` = "Baldia",
+                         `factor(KE_IBC)Bin Qasim` = "Bin Qasim",
+                         `factor(KE_IBC)Clifton` = "Clifton",
+                         `factor(KE_IBC)Defence` = "Defence",
+                         `factor(KE_IBC)F.B Area` = "F.B Area",
+                         `factor(KE_IBC)Gadap` = "Gadap",
+                         `factor(KE_IBC)Garden` = "Garden",
+                         `factor(KE_IBC)Gulshan-e-Iqbal` = "Gulshan-e-Iqbal",
+                         `factor(KE_IBC)Johar-I` = "Johar-I",
+                         `factor(KE_IBC)Johar-II` = "Johar-II",
+                         `factor(KE_IBC)Johar II` = "Johar II",
+                         `factor(KE_IBC)KIMZ` = "KIMZ",
+                         `factor(KE_IBC)Korangi` = "Korangi",
+                         `factor(KE_IBC)Landhi` = "Landhi",
+                         `factor(KE_IBC)Liaquatabad` = "Liaquatabad",
+                         `factor(KE_IBC)Lyari-I` = "Lyari-I",
+                         `factor(KE_IBC)Lyari-II` = "Lyari-II",
+                         `factor(KE_IBC)Malir` = "Malir",
+                         `factor(KE_IBC)Nazimabad` = "Nazimabad",
+                         `factor(KE_IBC)North Karachi` = "North Karachi",
+                         `factor(KE_IBC)North Nazimabad` = "North Nazimabad",
+                         `factor(KE_IBC)Orangi-I` = "Orangi-I",
+                         `factor(KE_IBC)Orangi-II` = "Orangi-II",
+                         `factor(KE_IBC)Saddar` = "Saddar",
+                         `factor(KE_IBC)Shah Faisal` = "Shah Faisal",
+                         `factor(KE_IBC)SITE` = "SITE",
+                         `factor(KE_IBC)Surjani` = "Surjani",
+                         `factor(KE_IBC)Tipu Sultan` = "Tipu Sultan",
+                         `factor(KE_IBC)Uthal` = "Uthal"
+                         ))
+
+```
+
+```{r}
+# Keep only the term and confidence intervals
+
+ciOLS <- ciOLS %>% 
+  select(term, conf.low, conf.high)
+
+# Round the values off
+
+ciOLS <- ciOLS %>% 
+  mutate(conf.low = round(conf.low, 5)) %>% 
+  mutate(conf.high = round(conf.high, 5))
+
+# Merge the columns into one
+
+ciOLS <- ciOLS %>% 
+  unite(OLSCI,
+        2:3,
+        remove = TRUE,
+        sep = ", ")
+```
+
+```{r}
+# Join Tables
+
+NL_OLS_table <- left_join(NL_OLS_table, ciOLS, by = c("Names" = "term"))
+```
+
+```{r}
+### Spatial Error Model
+
+NL_error_table <- error_table
+```
+
+```{r}
+# Recode rows
+
+NL_error_table <- NL_error_table %>% 
+  mutate(Names = recode(Names, 
+                        `(Intercept)` = "Intercept",
+                        rescale_tot = "Total",
+                        comRel = "Commercial %",
+                        resRel = "Residential %",
+                        indRel = "Industrial %",
+                        populationsum = "Population",
+                         `factor(KE_IBC)Baldia` = "Baldia",
+                         `factor(KE_IBC)Bin Qasim` = "Bin Qasim",
+                         `factor(KE_IBC)Clifton` = "Clifton",
+                         `factor(KE_IBC)Defence` = "Defence",
+                         `factor(KE_IBC)F.B Area` = "F.B Area",
+                         `factor(KE_IBC)Gadap` = "Gadap",
+                         `factor(KE_IBC)Garden` = "Garden",
+                         `factor(KE_IBC)Gulshan-e-Iqbal` = "Gulshan-e-Iqbal",
+                         `factor(KE_IBC)Johar-I` = "Johar-I",
+                         `factor(KE_IBC)Johar-II` = "Johar-II",
+                         `factor(KE_IBC)Johar II` = "Johar II",
+                         `factor(KE_IBC)KIMZ` = "KIMZ",
+                         `factor(KE_IBC)Korangi` = "Korangi",
+                         `factor(KE_IBC)Landhi` = "Landhi",
+                         `factor(KE_IBC)Liaquatabad` = "Liaquatabad",
+                         `factor(KE_IBC)Lyari-I` = "Lyari-I",
+                         `factor(KE_IBC)Lyari-II` = "Lyari-II",
+                         `factor(KE_IBC)Malir` = "Malir",
+                         `factor(KE_IBC)Nazimabad` = "Nazimabad",
+                         `factor(KE_IBC)North Karachi` = "North Karachi",
+                         `factor(KE_IBC)North Nazimabad` = "North Nazimabad",
+                         `factor(KE_IBC)Orangi-I` = "Orangi-I",
+                         `factor(KE_IBC)Orangi-II` = "Orangi-II",
+                         `factor(KE_IBC)Saddar` = "Saddar",
+                         `factor(KE_IBC)Shah Faisal` = "Shah Faisal",
+                         `factor(KE_IBC)SITE` = "SITE",
+                         `factor(KE_IBC)Surjani` = "Surjani",
+                         `factor(KE_IBC)Tipu Sultan` = "Tipu Sultan",
+                         `factor(KE_IBC)Uthal` = "Uthal"
+                         ))
+
+```
+
+```{r}
+# round values
+
+NL_error_table <- NL_error_table %>% 
+  mutate(estimates = round(error_estimates, 5)) %>% 
+  mutate(prz = round(error_prz, 5))
+
+NL_error_table <- NL_error_table %>% 
+  select(-error_estimates, -error_prz, -error_stderror)
+
+```
+
+```{r}
+# Recode rows
+
+ciError <- ciError %>% 
+  mutate(term = recode(term, 
+                        `(Intercept)` = "Intercept",
+                        rescale_tot = "Total",
+                        comRel = "Commercial %",
+                        resRel = "Residential %",
+                        indRel = "Industrial %",
+                        populationsum = "Population", 
+                         `factor(KE_IBC)Baldia` = "Baldia",
+                         `factor(KE_IBC)Bin Qasim` = "Bin Qasim",
+                         `factor(KE_IBC)Clifton` = "Clifton",
+                         `factor(KE_IBC)Defence` = "Defence",
+                         `factor(KE_IBC)F.B Area` = "F.B Area",
+                         `factor(KE_IBC)Gadap` = "Gadap",
+                         `factor(KE_IBC)Garden` = "Garden",
+                         `factor(KE_IBC)Gulshan-e-Iqbal` = "Gulshan-e-Iqbal",
+                         `factor(KE_IBC)Johar-I` = "Johar-I",
+                         `factor(KE_IBC)Johar-II` = "Johar-II",
+                         `factor(KE_IBC)Johar II` = "Johar II",
+                         `factor(KE_IBC)KIMZ` = "KIMZ",
+                         `factor(KE_IBC)Korangi` = "Korangi",
+                         `factor(KE_IBC)Landhi` = "Landhi",
+                         `factor(KE_IBC)Liaquatabad` = "Liaquatabad",
+                         `factor(KE_IBC)Lyari-I` = "Lyari-I",
+                         `factor(KE_IBC)Lyari-II` = "Lyari-II",
+                         `factor(KE_IBC)Malir` = "Malir",
+                         `factor(KE_IBC)Nazimabad` = "Nazimabad",
+                         `factor(KE_IBC)North Karachi` = "North Karachi",
+                         `factor(KE_IBC)North Nazimabad` = "North Nazimabad",
+                         `factor(KE_IBC)Orangi-I` = "Orangi-I",
+                         `factor(KE_IBC)Orangi-II` = "Orangi-II",
+                         `factor(KE_IBC)Saddar` = "Saddar",
+                         `factor(KE_IBC)Shah Faisal` = "Shah Faisal",
+                         `factor(KE_IBC)SITE` = "SITE",
+                         `factor(KE_IBC)Surjani` = "Surjani",
+                         `factor(KE_IBC)Tipu Sultan` = "Tipu Sultan",
+                         `factor(KE_IBC)Uthal` = "Uthal"
+                         ))
+
+```
+
+```{r}
+# Keep only the term and confidence intervals
+
+ciError <- ciError %>% 
+  select(term, conf.low, conf.high)
+
+# Round the values off
+
+ciError <- ciError %>% 
+  mutate(conf.low = round(conf.low, 5)) %>% 
+  mutate(conf.high = round(conf.high, 5))
+
+# Merge the columns into one
+
+ciError <- ciError %>% 
+  unite(errorCI,
+        2:3,
+        remove = TRUE,
+        sep = ", ")
+```
+
+```{r}
+# Join Tables
+
+NL_error_table <- left_join(NL_error_table, ciError, by = c("Names" = "term"))
+```
+
+```{r}
+### Join Tables
+
+results <- left_join(NL_OLS_table, NL_error_table, by = c("Names" = "Names"))
+```
+
+```{r}
+### Add model fit stats
+
+Names <- c("Summary Statistics", "Adjusted R-Squared", "Moran's I", "AIC", "Log-likelihood")
+OLSestimates <- c(NA, 0.546, 0.200, -1665.0386, 868.5193)
+OLSpvalue <- c(NA, NA, NA, NA, NA)
+estimates <- c(NA, 0.598, -0.008, -1773.5696, 923.7848)
+prz <- c(NA, NA, NA, NA, NA)
+
+modelStats <- data.frame(Names, OLSestimates, OLSpvalue, estimates, prz)
+
+```
+
+Table 1: Results from Spatial Error Model
+
+```{r}
+### Viz
+
+NL_error_results <- results %>% 
+  slice(1:6)
+
+NL_error_results <- bind_rows(NL_error_results, modelStats)
+
+NL_flex_error_results <- flextable(NL_error_results, col_keys = c("Names", 
+                                                    "OLSestimates",
+                                                    "OLSpvalue",
+                                                    "OLSCI",
+                                                    "estimates",
+                                                    "prz",
+                                                    "errorCI"))
+
+NL_flex_error_results <- colformat_num(NL_flex_error_results, 
+                                       col_keys = "OLSpvalue", 
+                                       i = ~ OLSpvalue < 0.05,
+                                       suffix = "*",
+                                       digits = 5)
+
+NL_flex_error_results <- colformat_num(NL_flex_error_results, 
+                                       col_keys = "prz", 
+                                       i = ~ prz < 0.05,
+                                       suffix = "*",
+                                       digits = 5)
+
+NL_flex_error_results <- set_header_labels(NL_flex_error_results,
+                                      Names = "Term",
+                                      OLSestimates = "OLS Model",
+                                      OLSpvalue = "OLS Model",
+                                      OLSCI = "OLS Model",
+                                      estimates = "Spatial Error Model",
+                                      prz = "Spatial Error Model",
+                                      errorCI = "Spatial Error Model")
+
+NL_flex_error_results <- merge_at(NL_flex_error_results,
+                                  i = 1,
+                                  j = 2:4,
+                                  part = "header")
+
+NL_flex_error_results <- merge_at(NL_flex_error_results,
+                                  i = 1,
+                                  j = 5:7,
+                                  part = "header")
+
+NL_flex_error_results <- add_header_row(NL_flex_error_results,
+                                        values = c("",
+                                                   "Estimate",
+                                                   "p",
+                                                   "95% CI",
+                                                   "Estimate",
+                                                   "Pr(>|z|)",
+                                                   "95% CI"),
+                                                   top = FALSE)
+
+NL_flex_error_results <- add_footer_lines(NL_flex_error_results,
+                                     values = c("* p < 0.05",
+                                                "* Pr(>|z|) < 0.05"))
+
+NL_flex_error_results <- align(NL_flex_error_results, 
+                          align = "center",
+                          part = "header")
+
+NL_flex_error_results <- fontsize(NL_flex_error_results, 
+                             part = "header",
+                             size = 12)
+
+NL_flex_error_results <- autofit(NL_flex_error_results, add_w = 0, add_h = 0)
+
+NL_flex_error_results <- add_header_lines(NL_flex_error_results,
+                                     values = c("Coefficient estimates from different modelling approaches"))
+
+save_as_docx(NL_flex_error_results,
+             path = here::here("analysis/07-Sup-Table-of-Results.docx"))
+```

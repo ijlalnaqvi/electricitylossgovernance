@@ -1,0 +1,23 @@
+Package: electricitylossgovernance
+Title: Compendium package for Towards a political economy of electricity loss: Exploring urban governance, theft, and spatial unevenness in Karachi, Pakistan
+Version: 0.0.1
+Authors@R:
+    c(person(given = "Ijlal",
+           family = "Naqvi",
+           role = c("aut", "cre"),
+           email = "ijlalnaqvi@smu.edu.sg")
+      person(given = "Ate",
+           family = "Poorthuis",
+           role = c("aut"),
+           email = "ate.poorthuis@kuleuven.be")
+      person(given = "Anirudh",
+           family = "Govind",
+           role = c("aut"),
+           email = "ijlalnaqvi@smu.edu.sg"))
+Description: Compendium package for Towards a political economy of electricity loss: Exploring urban governance, theft, and spatial unevenness in Karachi, Pakistan
+License: MIT
+ByteCompile: true
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.1

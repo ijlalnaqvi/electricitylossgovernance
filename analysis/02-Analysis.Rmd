@@ -1,0 +1,347 @@
+---
+title: "02-Analysis"
+date: '(`r format(Sys.Date(), "%d %B, %Y")`)'
+output:
+  github_document:
+    keep_html: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(broom)
+library(rgdal)
+library(sf)
+library(sp)
+library(spatialreg)
+library(spdep)
+library(tidyverse)
+library(tmap)
+```
+
+This file contains all the models (OLS, Spatial Lag and Spatial Error) prepared as part of this analysis.
+
+## Data Wrangling
+
+### Load Data
+
+```{r}
+# `feeders_year` contains statistical and recorded values of electricity consumption. It does not contain any geometry.
+
+feeders_year <- read.csv(here::here("analysis/data/raw_data/feeders_year.csv")) %>% 
+  select(-X)
+```
+
+```{r}
+# `sf_feeders_info` contains geometry for each feeder.
+
+sf_feeders_info <- readRDS(here::here("analysis/data/raw_data/sf_feeders_info.rds"))
+
+sf_feeders_info$GRIDID <- as.integer(sf_feeders_info$GRIDID)
+
+```
+
+```{r}
+# `sf_feeder_area_elec` is `feeders_year` plus the area of each feeder with its electricity density.
+
+sf_feeder_area_elec <- readRDS(here::here("analysis/data/derived_data/sf_feeder_area_elec.rds"))
+
+feeder_area_elec <- sf_feeder_area_elec %>% 
+  st_set_geometry(NULL)
+
+feeder_area_elec <- as.data.frame(feeder_area_elec)
+
+feeder_area_elec <- feeder_area_elec %>% 
+  select(GRIDID, FEEDER_NAM, KE_IBC, KE_REGION, elec_norm_area)
+
+```
+
+```{r}
+# `sf_feeder_population` contains the total population for each feeder as obtained from WorldPop. NAs have been replaced by 0.
+
+sf_feeder_population <- readRDS(here::here("analysis/data/derived_data/sf_feeder_population.rds"))
+
+sf_feeder_population$GRIDID <- as.integer(sf_feeder_population$GRIDID)
+
+feeder_population <- sf_feeder_population %>% 
+  st_set_geometry(NULL)
+```
+
+### Join Data
+
+```{r}
+# `geometry` is added to `feeders_year` and then saved as `sf_feeders`.
+
+sf_feeders <- left_join(sf_feeders_info, 
+                            feeders_year, 
+                            by = c("GRIDID" = "GRIDID",
+                                   "FEEDER_NAM" = "FEEDER_NAM",
+                                   "KE_IBC" = "KE_IBC",
+                                   "KE_REGION" = "KE_REGION"))
+
+# `feeder_area_elec` is added to `sf_feeders`.
+
+sf_feeders <- left_join(sf_feeders, 
+                        feeder_area_elec,
+                        by = c("GRIDID" = "GRIDID",
+                                   "FEEDER_NAM" = "FEEDER_NAM",
+                                   "KE_IBC" = "KE_IBC",
+                                   "KE_REGION" = "KE_REGION"))
+
+# `feeder_population` is added to `sf_feeders`.
+
+sf_feeders <- left_join(sf_feeders, 
+                        feeder_population,
+                        by = c("GRIDID" = "GRIDID",
+                                   "FEEDER_NAM" = "FEEDER_NAM",
+                                   "KE_IBC" = "KE_IBC",
+                                   "KE_REGION" = "KE_REGION"))
+```
+
+### Filter Data
+
+```{r}
+# Filter criteria = elec_norm_area > 1 and remove negative losses
+
+sf_feeders_filtered <- sf_feeders %>% 
+  filter(elec_norm_area > 1) %>% 
+  filter(losses > 0)
+```
+
+## Moran's I
+
+```{r}
+
+losses_sp <- as(sf_feeders_filtered, 'Spatial')
+losses_neighbours <- poly2nb(losses_sp)
+losses_weights <- nb2listw(losses_neighbours, 
+                           style = "W",
+                           zero.policy = T)
+losses_lag <- lag.listw(losses_weights, losses_sp$losses)
+
+losses_lag_df <- sf_feeders_filtered %>% 
+  add_column(losses_lag = losses_lag)
+
+losses_moran <- moran.test(losses_lag_df$losses, losses_weights, 
+                           zero.policy = T)
+
+losses_moran
+
+losses_moran$p.value
+```
+
+## OLS Model
+
+```{r}
+# Remove the received term as it gets included in losses
+
+ols_losses <- lm(losses ~ tot + comRel + resRel + indRel + populationsum + factor(KE_IBC), 
+                 data = sf_feeders_filtered)
+```
+
+```{r}
+OLS_table <- tidy(ols_losses)
+
+saveRDS(OLS_table, here::here("analysis/data/derived_data/res_OLS_coefficients.rds"))
+
+```
+
+```{r}
+# Calculate confidence intervals
+
+ciOLS <- as.data.frame(tidy(ols_losses, conf.int = TRUE))
+
+write.csv(ciOLS, here::here("analysis/data/derived_data/res_OLS_ci.csv"))
+```
+
+```{r}
+# Augment model
+
+sf_feeders_filtered <- augment(ols_losses, 
+                               data = sf_feeders_filtered) %>% 
+  st_as_sf()
+
+ols_coefficients <- data.frame(coefficients(ols_losses))
+
+# Coeff cleanup
+ols_coefficients <- cbind(Names = rownames(ols_coefficients), ols_coefficients)
+
+# Number rows
+rownames(ols_coefficients) <- 1:nrow(ols_coefficients)
+
+```
+
+#### Set Weights
+
+```{r}
+sf_feeders_filtered_sp <- as(sf_feeders_filtered, 'Spatial')
+sf_feeders_filtered_neighbours <- poly2nb(sf_feeders_filtered_sp)
+sf_feeders_filtered_weights <- nb2listw(sf_feeders_filtered_neighbours, 
+                                        style = "W", 
+                                        zero.policy = TRUE)
+sf_feeders_filtered$.resid_lag <- lag.listw(sf_feeders_filtered_weights, 
+                                            sf_feeders_filtered$.resid)
+
+```
+
+```{r}
+lm(.resid_lag ~ .resid, sf_feeders_filtered)
+
+OLS_moran <- moran.test(sf_feeders_filtered$.resid, 
+           sf_feeders_filtered_weights, 
+           adjust.n = TRUE, 
+           zero.policy = TRUE)
+
+OLS_moran$p.value
+
+```
+
+## Spatial Lag Model
+
+```{r}
+# Rescale variables
+
+rescale_tot <- (scale(as.numeric(sf_feeders_filtered$tot)))
+
+rescale_tot <- as.data.frame(rescale_tot)
+
+# Join rescaled variables
+
+sf_feeders_filtered <- bind_cols(sf_feeders_filtered, rescale_tot)
+
+sf_feeders_filtered <- sf_feeders_filtered %>% 
+  rename(rescale_tot = `V1`)
+```
+
+```{r}
+lag_losses <- lagsarlm(losses ~ rescale_tot + comRel + resRel + indRel + populationsum + factor(KE_IBC),
+                 data = sf_feeders_filtered,
+                 listw = sf_feeders_filtered_weights,
+                 na.action(sf_feeders_filtered_weights),
+                 zero.policy = T)
+
+```
+
+```{r}
+
+lag_estimates <- summary(lag_losses)$Coef[,1]
+lag_estimates <- as.data.frame(lag_estimates)
+lag_estimates <- cbind(Names = rownames(lag_estimates), lag_estimates)
+rownames(lag_estimates) <- 1:nrow(lag_estimates)
+
+
+lag_stderror <- summary(lag_losses)$Coef[,2]
+lag_stderror <- as.data.frame(lag_stderror)
+lag_stderror <- cbind(Names = rownames(lag_stderror), lag_stderror)
+rownames(lag_stderror) <- 1:nrow(lag_stderror)
+
+lag_prz <- summary(lag_losses)$Coef[,4]
+lag_prz <- as.data.frame(lag_prz)
+
+lag_prz <- cbind(Names = rownames(lag_prz), lag_prz)
+rownames(lag_prz) <- 1:nrow(lag_prz)
+
+lag_table <- left_join(lag_estimates, lag_stderror)
+lag_table <- left_join(lag_table, lag_prz)
+
+# Calculate confidence intervals
+
+ciLag <- as.data.frame(tidy(lag_losses, conf.int = TRUE))
+
+```
+
+```{r}
+impacts(lag_losses, listw = sf_feeders_filtered_weights)
+
+sf_feeders_filtered$resid_lagsarlm <- residuals(lag_losses)
+
+```
+
+```{r}
+
+lag_moran <- moran.test(sf_feeders_filtered$resid_lagsarlm, 
+           sf_feeders_filtered_weights, 
+           adjust.n = TRUE, 
+           zero.policy = TRUE)
+
+lag_moran$p.value
+```
+
+```{r}
+lag_coefficients <- data.frame(coefficients(lag_losses))
+
+# Coeff cleanup
+lag_coefficients <- cbind(Names = rownames(lag_coefficients), lag_coefficients)
+
+# Number rows
+rownames(lag_coefficients) <- 1:nrow(lag_coefficients)
+
+```
+
+## Spatial Error Model
+
+```{r}
+error_losses <- errorsarlm(losses ~ rescale_tot + comRel + resRel + indRel + populationsum + factor(KE_IBC),  data = sf_feeders_filtered,
+                 listw = sf_feeders_filtered_weights,
+                 na.action(sf_feeders_filtered_weights),
+                 zero.policy = T)
+
+```
+
+```{r}
+error_estimates <- summary(error_losses)$Coef[,1]
+error_estimates <- as.data.frame(error_estimates)
+error_estimates <- cbind(Names = rownames(error_estimates), error_estimates)
+rownames(error_estimates) <- 1:nrow(error_estimates)
+
+error_stderror <- summary(error_losses)$Coef[,2]
+error_stderror <- as.data.frame(error_stderror)
+error_stderror <- cbind(Names = rownames(error_stderror), error_stderror)
+rownames(error_stderror) <- 1:nrow(error_stderror)
+
+error_prz <- summary(error_losses)$Coef[,4]
+error_prz <- as.data.frame(error_prz)
+error_prz <- cbind(Names = rownames(error_prz), error_prz)
+rownames(error_prz) <- 1:nrow(error_prz)
+
+error_table <- left_join(error_estimates, error_stderror)
+error_table <- left_join(error_table, error_prz)
+
+saveRDS(error_table, here::here("analysis/data/derived_data/res_error_coefficients.rds"))
+
+# Calculate confidence intervals
+
+ciError <- as.data.frame(tidy(error_losses, conf.int = TRUE))
+
+write.csv(ciError, here::here("analysis/data/derived_data/res_error_ci.csv"))
+
+sf_feeders_filtered$resid_error <- residuals(error_losses)
+
+```
+
+```{r}
+error_moran <- moran.test(sf_feeders_filtered$resid_error, 
+           sf_feeders_filtered_weights, 
+           adjust.n = TRUE, 
+           zero.policy = TRUE)
+
+error_moran$p.value
+```
+
+```{r}
+error_coefficients <- data.frame(coefficients(error_losses))
+
+# Coeff cleanup
+error_coefficients <- cbind(Names = rownames(error_coefficients), error_coefficients)
+
+# Number rows
+rownames(error_coefficients) <- 1:nrow(error_coefficients)
+
+```
+
+### Export Residuals
+
+```{r}
+saveRDS(sf_feeders_filtered, here::here("analysis/data/derived_data/res_model_residuals.rds"))
+
+```
