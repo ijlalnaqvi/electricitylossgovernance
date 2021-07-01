@@ -11,14 +11,14 @@ knitr::opts_chunk$set(
   fig.path = "README-"
 )
 # Please put your title here to include it in the file below.
-Title <- "Towards a political economy of electricity loss: Exploring urban governance, theft, and spatial unevenness in Karachi, Pakistan"
+Title <- "Urban Governance and Electricity Losses: An Exploration of Spatial Unevenness in Karachi, Pakistan"
 
 Authors <- "I Naqvi, A Poorthuis, A Govind"
 ```
 
 # Towards a political economy of electricity loss: Exploring urban governance, theft, and spatial unevenness in Karachi, Pakistan
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/anirudhgovind/electricitylosseskarachi/master?urlpath=rstudio)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/ijlalnaqvi/electricitylossgovernance/master?urlpath=rstudio)
 
 This repository contains the data and code for our paper:
 

@@ -3,21 +3,20 @@
 
 # Towards a political economy of electricity loss: Exploring urban governance, theft, and spatial unevenness in Karachi, Pakistan
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/anirudhgovind/electricitylosseskarachi/master?urlpath=rstudio)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/ijlalnaqvi/electricitylossgovernance/master?urlpath=rstudio)
 
 This repository contains the data and code for our paper:
 
-> *I Naqvi, A Poorthuis, A Govind*, (2021). *Towards a political economy
-> of electricity loss: Exploring urban governance, theft, and spatial
-> unevenness in Karachi, Pakistan*. Name of journal/book
-> <https://doi.org/xxx/xxx>
+> *I Naqvi, A Poorthuis, A Govind*, (2021). *Urban Governance and
+> Electricity Losses: An Exploration of Spatial Unevenness in Karachi,
+> Pakistan*. Name of journal/book <https://doi.org/xxx/xxx>
 
 Our pre-print is online here:
 
-> *I Naqvi, A Poorthuis, A Govind*, (2021). *Towards a political economy
-> of electricity loss: Exploring urban governance, theft, and spatial
-> unevenness in Karachi, Pakistan*. Name of journal/book, Accessed 11
-> Jun 2021. Online at <https://doi.org/xxx/xxx>
+> *I Naqvi, A Poorthuis, A Govind*, (2021). *Urban Governance and
+> Electricity Losses: An Exploration of Spatial Unevenness in Karachi,
+> Pakistan*. Name of journal/book, Accessed 01 Jul 2021. Online at
+> <https://doi.org/xxx/xxx>
 
 ## Contents
 

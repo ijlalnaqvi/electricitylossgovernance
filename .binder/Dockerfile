@@ -1,4 +1,4 @@
-FROM rocker/binder:4.0.2
+FROM rocker/binder:3.6.3
 LABEL maintainer='Ijlal Naqvi'
 USER root
 COPY . ${HOME}
@@ -7,6 +7,6 @@ USER ${NB_USER}
 
 
 
-RUN wget https://github.com/anirudhgovind/electricitylossgovernance/raw/master/DESCRIPTION && R -e "options(repos = list(CRAN = 'http://mran.revolutionanalytics.com/snapshot/2021-05-31/')); devtools::install_deps()"
+RUN wget https://github.com/ijlalnaqvi/electricitylossgovernance/blob/main/DESCRIPTION && R -e "options(repos = list(CRAN = 'http://mran.revolutionanalytics.com/snapshot/2021-05-31/')); devtools::install_deps()"
 
 RUN rm DESCRIPTION.1; exit 0
