@@ -5,6 +5,8 @@
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/ijlalnaqvi/electricitylossgovernance/main?urlpath=rstudio)
 
+[![DOI](https://zenodo.org/badge/375868242.svg)](https://zenodo.org/badge/latestdoi/375868242)
+
 This repository contains the data and code for our paper:
 
 > *I Naqvi, A Poorthuis, A Govind*, (2021). *Urban Governance and
