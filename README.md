@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# Towards a political economy of electricity loss: Exploring urban governance, theft, and spatial unevenness in Karachi, Pakistan
+# Urban Governance and Electricity Losses: An Exploration of Spatial Unevenness in Karachi, Pakistan
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/ijlalnaqvi/electricitylossgovernance/main?urlpath=rstudio)
 
