@@ -14,6 +14,8 @@ knitr::opts_chunk$set(
 Title <- "Urban Governance and Electricity Losses: An Exploration of Spatial Unevenness in Karachi, Pakistan"
 
 Authors <- "I Naqvi, A Poorthuis, A Govind"
+
+Journal <- "Energy Research and Social Science"
 ```
 
 # Towards a political economy of electricity loss: Exploring urban governance, theft, and spatial unevenness in Karachi, Pakistan
@@ -22,11 +24,11 @@ Authors <- "I Naqvi, A Poorthuis, A Govind"
 
 This repository contains the data and code for our paper:
 
-> _`r Authors`_, (2021). _`r Title`_. Name of journal/book <https://doi.org/xxx/xxx>
+> _`r Authors`_, (2021). _`r Title`_. _`r Journal`_ <https://doi.org/xxx/xxx>
 
 Our pre-print is online here:
 
-> _`r Authors`_, (2021). _`r Title`_. Name of journal/book, Accessed `r format(Sys.Date(), "%d %b %Y")`. Online at <https://doi.org/xxx/xxx>
+> _`r Authors`_, (2021). _`r Title`_. _`r Journal`_, Accessed `r format(Sys.Date(), "%d %b %Y")`. Online at <https://doi.org/xxx/xxx>
 
 ## Contents
 
