@@ -13,7 +13,7 @@ knitr::opts_chunk$set(
 # Please put your title here to include it in the file below.
 Title <- "Urban Governance and Electricity Losses: An Exploration of Spatial Unevenness in Karachi, Pakistan"
 
-Authors <- "I Naqvi, A Poorthuis, A Govind"
+Authors <- "Ijlal Naqvi, Ate Poorthuis, Anirudh Govind"
 
 Journal <- "Energy Research and Social Science"
 ```
@@ -25,11 +25,7 @@ Journal <- "Energy Research and Social Science"
 
 This repository contains the data and code for our paper:
 
-> _`r Authors`_, (2021). _`r Title`_. _`r Journal`_ <https://doi.org/xxx/xxx>
-
-Our pre-print is online here:
-
-> _`r Authors`_, (2021). _`r Title`_. _`r Journal`_, Accessed `r format(Sys.Date(), "%d %b %Y")`. Online at <https://doi.org/xxx/xxx>
+> _`r Authors`_, (2021). _`r Title`_. _`r Journal`_ <https://doi.org/10.1016/j.erss.2021.102166>
 
 ## Contents
 

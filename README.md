@@ -8,17 +8,10 @@
 
 This repository contains the data and code for our paper:
 
-> *I Naqvi, A Poorthuis, A Govind*, (2021). *Urban Governance and
-> Electricity Losses: An Exploration of Spatial Unevenness in Karachi,
-> Pakistan*. *Energy Research and Social Science*
-> <https://doi.org/xxx/xxx>
-
-Our pre-print is online here:
-
-> *I Naqvi, A Poorthuis, A Govind*, (2021). *Urban Governance and
-> Electricity Losses: An Exploration of Spatial Unevenness in Karachi,
-> Pakistan*. *Energy Research and Social Science*, Accessed 01 Jul 2021.
-> Online at <https://doi.org/xxx/xxx>
+> *Ijlal Naqvi, Ate Poorthuis, Anirudh Govind*, (2021). *Urban
+> Governance and Electricity Losses: An Exploration of Spatial
+> Unevenness in Karachi, Pakistan*. *Energy Research and Social Science*
+> <https://doi.org/10.1016/j.erss.2021.102166>
 
 ## Contents
 
